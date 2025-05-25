@@ -121,6 +121,7 @@ class GPT(nn.Module):
         # Then, forward to the layernorm and the final classifier
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)    # (B, T, vocab_size)
+        return logits
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -174,7 +175,49 @@ class GPT(nn.Module):
                 with torch.no_grad():
                     sd[k].copy_(sd_hf[k])
         return model
-    
+
+num_return_sequences = 5    # the number of sequences in a batch to be processed
+max_length = 30             # This is the maximum length of each of those 5 sequences
+
 
 model = GPT.from_pretrained('gpt2')
 print("Didn't crash while copying the weights from a hugging gpt2 model to our implemented model")
+
+model.eval()
+model.to('cuda')
+
+# prefix tokens: The initial set of prompts (later converted to tokens) given by a user/ human, and we start with this set of prompts and later the GPT model starts generating tokens one after the other from here!
+
+# prefix tokens
+import tiktoken   # this is the library we use to tokenize the prompt
+enc = tiktoken.get_encoding("gpt2")
+tokens = enc.encode("Hello, I am a language model,")    # Now the model will be completing this prompt
+tokens = torch.tensor(tokens, dtype=torch.long)    # (8,) above sentence equates to 8 tokens
+tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)    # (5, 8) batch size of 5 sents
+x = tokens.to("cuda")
+
+# Now comes the generation phase
+# x = (B, T), this is the input to the model
+torch.manual_seed(42)
+torch.cuda.manual_seed(42)
+while x.size(1) < max_length: # each of the 5 sequences's length must be less than 30 as defined above, only generate new tokens
+    with torch.no_grad():
+        logits = model(x)    #(B, T, vocab_size)
+        # Get the probabilities
+        probs = F.softmax(logits, dim=-1)
+        # Do top-k sampling of 50 (huggingface pipeline default)
+        # top-k_probs here becomes (5, 50), tok_indices is also (5, 50)
+        topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
+        # top-50 probability values itself and also it's corresponding indices
+        # Now, just select a single token from the top50 options
+        # Note: multinomial does not demand the input to sum to 1
+        ix = torch.multinomial(topk_probs, 1)  # (B, 1)
+        # Gather the corresponding indices
+        xcol = torch.gather(topk_indices, -1, ix)   # (B, 1)
+        x = torch.cat((x, xcol), dim=1)    # Add the newly generated tokens to the existing set of tokens or the initial set of prompts, if we are generating tokens for the first time!
+
+# print the generated text
+for i in range(num_return_sequences):
+    tokens = x[i, :max_length].tolist()
+    decoded = enc.decode(tokens)
+    print(">", decoded)
