@@ -105,7 +105,7 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(config.n_embed, config.vocab_size, bias=False)
         # So lm_head is the projection layer that takes  the embedding dimensionality for each token and then projects it back to the vocab_size, and we choose the vocab (or the next token from here!)
 
-    def forward(self, idx):
+    def forward(self, idx, targets=None):
         # idx in the above case is the token id from the vocabulary of size 50257
         B, T = idx.size()
         assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.config.block_size}"
@@ -121,7 +121,11 @@ class GPT(nn.Module):
         # Then, forward to the layernorm and the final classifier
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)    # (B, T, vocab_size)
-        return logits
+        # return logits
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -210,8 +214,8 @@ y = buf[1:].view(B, T)
 # model.to('cuda')
 model.to(device)
 
-logits = model(x)      # we are passing the above mentioned "x" through an untrained so expect to get some giberish!
-print(logits.shape)
+logits, loss = model(x, y)      # we are passing the above mentioned "x" through an untrained so expect to get some giberish!
+print(loss)
 import sys; sys.exit(0)
 
 # prefix tokens: The initial set of prompts (later converted to tokens) given by a user/ human, and we start with this set of prompts and later the GPT model starts generating tokens one after the other from here!
