@@ -180,6 +180,40 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
         return model
     
+
+# Now we are going to define a simple DataLoader class, so that we don't keep on feeding the same class!
+class DataLoaderLite:
+    
+    def __init__(self, B, T):
+        self.B = B
+        self.T = T
+
+        # at init load tokens from the disk and store them in the memory
+        with open('input.txt', 'r') as f:
+            text = f.read()
+        enc = tiktoken.get_encoding("gpt2")
+        tokens = enc.encode(text)
+        self.tokens = torch.tensor(tokens)
+        print(f"Loaded {len(self.tokens)} tokens")
+        print(f"1 epoch contains {len(self.tokens) // (B * T)} batches")
+        # just for info: 1 epoch passes all the batches forward and backward
+
+        # state, which position in the sequences are we starting from
+        self.current_position = 0
+
+    def next_batch(self):
+        B, T = self.B, self.T
+        buf = self.tokens[self.current_position: self.current_position + B * T + 1]  # +1 in this case is the GT for the very last token
+        x = (buf[:-1].view(B, T))  # input to the model
+        y = (buf[1:].view(B, T))   # targets for the model
+        # Once we have filled in these tokens in the first batch move the current position so that we can retrieve the next fresh set of batches
+        self.current_position += B * T
+        # if loading the next batch would be out of bounds, just reset
+        if self.current_position + (B * T + 1) > len(self.tokens):
+            self.current_position = 0
+        return x, y
+
+    
 # Simple block of code to detect device autonomously
 device = "cpu" # default
 if torch.cuda.is_available():
@@ -197,19 +231,7 @@ max_length = 30             # This is the maximum length of each of those 5 sequ
 model = GPT(GPTConfig())    # randomly initialized model
 print("Didn't crash while copying the weights from a hugging gpt2 model to our implemented model")
 
-# Get a data batch
-import tiktoken
-enc = tiktoken.get_encoding("gpt2")
-with open('input.txt', 'r') as f:
-    text = f.read()
-text = text[:1000]      # Taking into consideration first 1000 characters
-tokens = enc.encode(text)
-B, T = 4, 32     # 4 sequences each of max length 32
-buf = torch.tensor(tokens[:B * T + 1])   # +1 in this case is the GT for the very last token
-buf = buf.to(device)
-x = buf[:-1].view(B, T)
-y = buf[1:].view(B, T)
-
+train_loader = DataLoaderLite(B=4, T=32)
 
 # model.eval()
 # model.to('cuda')
@@ -221,6 +243,8 @@ model.to(device)
 # defining the optimizer and optimizing the parameters
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 for i in range(50):  # 50 iterations
+    x, y = train_loader.next_batch()
+    x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
     logits, loss = model(x, y)
     loss.backward()
