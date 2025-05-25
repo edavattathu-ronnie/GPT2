@@ -183,7 +183,7 @@ if torch.cuda.is_available():
 elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():  # for Mac!
     device = "mps"
 print(f"using device: {device}")
-
+device = "cpu"
 
 num_return_sequences = 5    # the number of sequences in a batch to be processed
 max_length = 30             # This is the maximum length of each of those 5 sequences
@@ -193,15 +193,35 @@ max_length = 30             # This is the maximum length of each of those 5 sequ
 model = GPT(GPTConfig())    # randomly initialized model
 print("Didn't crash while copying the weights from a hugging gpt2 model to our implemented model")
 
-model.eval()
+# Get a data batch
+import tiktoken
+enc = tiktoken.get_encoding("gpt2")
+with open('input.txt', 'r') as f:
+    text = f.read()
+text = text[:1000]      # Taking into consideration first 1000 characters
+tokens = enc.encode(text)
+B, T = 4, 32     # 4 sequences each of max length 32
+buf = torch.tensor(tokens[:B * T + 1])   # +1 in this case is the GT for the very last token
+x = buf[:-1].view(B, T)
+y = buf[1:].view(B, T)
+
+
+# model.eval()
 # model.to('cuda')
 model.to(device)
+
+logits = model(x)      # we are passing the above mentioned "x" through an untrained so expect to get some giberish!
+print(logits.shape)
+import sys; sys.exit(0)
 
 # prefix tokens: The initial set of prompts (later converted to tokens) given by a user/ human, and we start with this set of prompts and later the GPT model starts generating tokens one after the other from here!
 
 # prefix tokens
 import tiktoken   # this is the library we use to tokenize the prompt
 enc = tiktoken.get_encoding("gpt2")
+model.eval()
+num_return_sequences = 5
+max_length = 30
 tokens = enc.encode("Hello, I am a language model,")    # Now the model will be completing this prompt
 tokens = torch.tensor(tokens, dtype=torch.long)    # (8,) above sentence equates to 8 tokens
 tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)    # (5, 8) batch size of 5 sents
