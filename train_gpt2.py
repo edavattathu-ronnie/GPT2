@@ -187,7 +187,7 @@ if torch.cuda.is_available():
 elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():  # for Mac!
     device = "mps"
 print(f"using device: {device}")
-device = "cpu"
+
 
 num_return_sequences = 5    # the number of sequences in a batch to be processed
 max_length = 30             # This is the maximum length of each of those 5 sequences
@@ -206,6 +206,7 @@ text = text[:1000]      # Taking into consideration first 1000 characters
 tokens = enc.encode(text)
 B, T = 4, 32     # 4 sequences each of max length 32
 buf = torch.tensor(tokens[:B * T + 1])   # +1 in this case is the GT for the very last token
+buf = buf.to(device)
 x = buf[:-1].view(B, T)
 y = buf[1:].view(B, T)
 
@@ -214,8 +215,18 @@ y = buf[1:].view(B, T)
 # model.to('cuda')
 model.to(device)
 
-logits, loss = model(x, y)      # we are passing the above mentioned "x" through an untrained so expect to get some giberish!
-print(loss)
+# logits, loss = model(x, y)      # we are passing the above mentioned "x" through an untrained so expect to get some giberish!
+
+# Just a small sanity check, and thus we are overfitting the model to this small batch!
+# defining the optimizer and optimizing the parameters
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+for i in range(50):  # 50 iterations
+    optimizer.zero_grad()
+    logits, loss = model(x, y)
+    loss.backward()
+    optimizer.step()
+    print(f"Step {i}, loss: {loss.item()}")  # loss.item -> shifting the loss tensor value from the gpu to the cpu and also converting to a float value
+
 import sys; sys.exit(0)
 
 # prefix tokens: The initial set of prompts (later converted to tokens) given by a user/ human, and we start with this set of prompts and later the GPT model starts generating tokens one after the other from here!
