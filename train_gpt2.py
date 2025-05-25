@@ -105,6 +105,9 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(config.n_embed, config.vocab_size, bias=False)
         # So lm_head is the projection layer that takes  the embedding dimensionality for each token and then projects it back to the vocab_size, and we choose the vocab (or the next token from here!)
 
+        # weight sharing scheme
+        self.transformer.wte.weight = self.lm_head.weight
+
     def forward(self, idx, targets=None):
         # idx in the above case is the token id from the vocabulary of size 50257
         B, T = idx.size()
