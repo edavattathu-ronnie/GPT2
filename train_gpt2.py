@@ -105,6 +105,23 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(config.n_embed, config.vocab_size, bias=False)
         # So lm_head is the projection layer that takes  the embedding dimensionality for each token and then projects it back to the vocab_size, and we choose the vocab (or the next token from here!)
 
+    def forward(self, idx):
+        # idx in the above case is the token id from the vocabulary of size 50257
+        B, T = idx.size()
+        assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.config.block_size}"
+        # forward the token and the position embeddings
+        pos = torch.arange(0, T, dtype=torch.long, device=idx.device)   # shape (T), positions for the tokens that we get from a sequence
+        pos_emb = self.transformer.wpe(pos)     # position embeddings (T, n_embed)
+        tok_emb = self.transformer.wte(idx)     # Token embeddings (B, T, n_embed)
+        # pos_emb will be the same across all the sequences in the batch and thus we will just broadcast it, and thus the missing "batch_dimension" in the above case
+        x = tok_emb + pos_emb
+        # Next, forward to the block of the transformer
+        for block in self.transformer.h:
+            x = block(x)
+        # Then, forward to the layernorm and the final classifier
+        x = self.transformer.ln_f(x)
+        logits = self.lm_head(x)    # (B, T, vocab_size)
+
     @classmethod
     def from_pretrained(cls, model_type):
         r"""
