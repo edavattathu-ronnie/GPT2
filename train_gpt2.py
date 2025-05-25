@@ -165,7 +165,7 @@ class GPT(nn.Module):
         assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
         for k in sd_keys_hf:
             if any(k.endswith(w) for w in transposed):
-                # Special treatment for COnv1D weights since we need to transpose them
+                # Special treatment for Conv1D weights since we need to transpose them
                 assert sd_hf[k].shape[::-1] == sd[k].shape
                 with torch.no_grad():
                     sd[k].copy_(sd_hf[k].t())
@@ -175,16 +175,27 @@ class GPT(nn.Module):
                 with torch.no_grad():
                     sd[k].copy_(sd_hf[k])
         return model
+    
+# Simple block of code to detect device autonomously
+device = "cpu" # default
+if torch.cuda.is_available():
+    device = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():  # for Mac!
+    device = "mps"
+print(f"using device: {device}")
+
 
 num_return_sequences = 5    # the number of sequences in a batch to be processed
 max_length = 30             # This is the maximum length of each of those 5 sequences
 
 
-model = GPT.from_pretrained('gpt2')
+# model = GPT.from_pretrained('gpt2')     #loading the model from pretrained weights
+model = GPT(GPTConfig())    # randomly initialized model
 print("Didn't crash while copying the weights from a hugging gpt2 model to our implemented model")
 
 model.eval()
-model.to('cuda')
+# model.to('cuda')
+model.to(device)
 
 # prefix tokens: The initial set of prompts (later converted to tokens) given by a user/ human, and we start with this set of prompts and later the GPT model starts generating tokens one after the other from here!
 
@@ -194,7 +205,8 @@ enc = tiktoken.get_encoding("gpt2")
 tokens = enc.encode("Hello, I am a language model,")    # Now the model will be completing this prompt
 tokens = torch.tensor(tokens, dtype=torch.long)    # (8,) above sentence equates to 8 tokens
 tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)    # (5, 8) batch size of 5 sents
-x = tokens.to("cuda")
+# x = tokens.to("cuda")
+x = tokens.to(device)
 
 # Now comes the generation phase
 # x = (B, T), this is the input to the model
