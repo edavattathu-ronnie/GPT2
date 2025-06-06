@@ -232,6 +232,7 @@ class DataLoaderLite:
             self.current_position = 0
         return x, y
 
+import time
     
 # Simple block of code to detect device autonomously
 device = "cpu" # default
@@ -246,15 +247,16 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
-num_return_sequences = 5    # the number of sequences in a batch to be processed
-max_length = 30             # This is the maximum length of each of those 5 sequences
+# num_return_sequences = 5    # the number of sequences in a batch to be processed
+# max_length = 30             # This is the maximum length of each of those 5 sequences
 
+train_loader = DataLoaderLite(B=16, T=1024)
+
+torch.set_float32_matmul_precision('high')
 
 # model = GPT.from_pretrained('gpt2')     #loading the model from pretrained weights
 model = GPT(GPTConfig())    # randomly initialized model
 print("Didn't crash while copying the weights from a hugging gpt2 model to our implemented model")
-
-train_loader = DataLoaderLite(B=4, T=32)
 
 # model.eval()
 # model.to('cuda')
@@ -266,13 +268,21 @@ model.to(device)
 # defining the optimizer and optimizing the parameters
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 for i in range(50):  # 50 iterations
+    t0 = time.time()
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
     logits, loss = model(x, y)
     loss.backward()
     optimizer.step()
-    print(f"Step {i}, loss: {loss.item()}")  # loss.item -> shifting the loss tensor value from the gpu to the cpu and also converting to a float value
+    # print(f"Step {i}, loss: {loss.item()}")  # loss.item -> shifting the loss tensor value from the gpu to the cpu and also converting to a float value
+    torch.cuda.synchronize()   # wait for all the GPU related task to be finished
+    t1 = time.time()
+    dt = (t1 - t0)*1000   # time difference in miliseconds
+    tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
+    # so in each time step, the total number of tokens processed will be (batch_size(num_prompts in a batch) * (length of sequence of each prompt))
+    print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f}ms, tok/sec:{tokens_per_sec:.2f}")
+
 
 import sys; sys.exit(0)
 
@@ -315,3 +325,37 @@ for i in range(num_return_sequences):
     tokens = x[i, :max_length].tolist()
     decoded = enc.decode(tokens)
     print(">", decoded)
+
+
+
+
+############### just block of code to understand DDP in detail
+def main(rank: int, world_size: int, save_every: int, total_epochs: int, batch_size: int):
+    """
+    Main training function for distributed data parallel (DDP) setup.
+
+    Args:
+        rank (int): The rank of the current process (0 <= rank < world_size). Each process is assigned a unique rank.
+        world_size (int): Total number of processes involved in the distributed training.
+        save_every (int): Frequency of model checkpoint saving, in terms of epochs.
+        total_epochs (int): Total number of epochs for training.
+        batch_size (int): Number of samples processed in one iteration (forward and backward pass).
+    """
+
+    # Set up the distributed environment, including setting the master address, port, and backend.
+    ddp_setup(rank, world_size)
+
+    # Load the necessary training objects - dataset, model, and optimizer.
+    dataset, model, optimizer = load_train_objs()
+
+    # Prepare the data loader for distributed training. It partitions the dataset across the processes and handles shuffling.
+    train_data = prepare_dataloader(dataset, batch_size)
+
+    # Initialize the trainer instance with the loaded model, data, and other configurations.
+    trainer = Trainer(model, train_data, optimizer, rank, save_every)
+
+    # Train the model for the specified number of epochs.
+    trainer.train(total_epochs)
+
+    # Cleanup the distributed environment after training is complete.
+    destroy_process_group()
