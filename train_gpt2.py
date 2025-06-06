@@ -272,7 +272,8 @@ for i in range(50):  # 50 iterations
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
-    logits, loss = model(x, y)
+    with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        logits, loss = model(x, y)
     loss.backward()
     optimizer.step()
     # print(f"Step {i}, loss: {loss.item()}")  # loss.item -> shifting the loss tensor value from the gpu to the cpu and also converting to a float value
