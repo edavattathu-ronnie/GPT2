@@ -261,6 +261,7 @@ print("Didn't crash while copying the weights from a hugging gpt2 model to our i
 # model.eval()
 # model.to('cuda')
 model.to(device)
+model = torch.compile(model)
 
 # logits, loss = model(x, y)      # we are passing the above mentioned "x" through an untrained so expect to get some giberish!
 
